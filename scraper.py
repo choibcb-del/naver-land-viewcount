@@ -1,33 +1,35 @@
 from playwright.sync_api import sync_playwright
+import json
 
 API_URL = "https://fin.land.naver.com/front-api/v1/complex/complexClusters"
 
-payload = {
-  "filter": {
-    "tradeTypes": ["A1"],
-    "realEstateTypes": ["A01"],
-    "roomCount": [],
-    "bathRoomCount": [],
-    "optionTypes": [],
-    "oneRoomShapeTypes": [],
-    "moveInTypes": [],
-    "filtersExclusiveSpace": False,
-    "floorTypes": [],
-    "directionTypes": [],
-    "hasArticlePhoto": False,
-    "isAuthorizedByOwner": False,
-    "parkingTypes": [],
-    "entranceTypes": [],
-    "hasArticle": False
-  },
-  "boundingBox": {
-    "left": 127.08829528276294,
-    "right": 127.08999069434759,
-    "top": 37.60008756612412,
-    "bottom": 37.59913186675824
-  },
-  "precision": 18.948667263440065,
-  "userChannelType": "PC"
+# 보내주신 최신 Copy as fetch의 body를 파싱해서 그대로 사용
+API_BODY = {
+    "filter": {
+        "tradeTypes": ["A1", "B1"],
+        "realEstateTypes": ["A01", "A04", "B01"],
+        "roomCount": [],
+        "bathRoomCount": [],
+        "optionTypes": [],
+        "oneRoomShapeTypes": [],
+        "moveInTypes": [],
+        "filtersExclusiveSpace": False,
+        "floorTypes": [],
+        "directionTypes": [],
+        "hasArticlePhoto": False,
+        "isAuthorizedByOwner": False,
+        "parkingTypes": [],
+        "entranceTypes": [],
+        "hasArticle": False
+    },
+    "boundingBox": {
+        "left": 127.08735311730976,
+        "right": 127.0894130835772,
+        "top": 37.60024396982949,
+        "bottom": 37.598777071015576
+    },
+    "precision": 18.858996210416944,
+    "userChannelType": "PC"
 }
 
 def find_complex(obj, target_complex_number):
@@ -51,57 +53,54 @@ def find_complex(obj, target_complex_number):
 
 def main():
     with sync_playwright() as p:
-        # 자동화 탐지(navigator.webdriver)를 완전히 숨기는 옵션 적용
         browser = p.chromium.launch(
             headless=True,
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu"
+                "--disable-dev-shm-usage"
             ]
         )
         
         context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
             locale="ko-KR",
-            timezone_id="Asia/Seoul",
-            viewport={"width": 1920, "height": 1080}
+            timezone_id="Asia/Seoul"
         )
         
-        # 봇 탐지 우회 스크립트 주입
         context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined});")
         
         page = context.new_page()
         
-        print("1. 네이버 부동산 메인 세션 초기화 접속 중...")
+        print("1. 네이버 부동산 지도 페이지로 정밀 세션 진입 중...")
         try:
-            # 연결 리셋을 피하기 위해 네이버 부동산 메인으로 부드럽게 진입
-            page.goto("https://land.naver.com/", wait_until="domcontentloaded", timeout=45000)
-            page.wait_for_timeout(3000) # 세션 쿠키 발급 대기
-        except Exception as e:
-            print(f"메인 접속 경고 (속행): {e}")
-
-        print("2. API 도메인 세션으로 이동 및 API POST 요청 전송 중...")
-        # API가 요구하는 출처(Origin) 세션을 맞추기 위해 지도 페이지로 이동 후 fetch 수행
-        try:
-            page.goto("https://fin.land.naver.com/map", wait_until="domcontentloaded", timeout=45000)
+            # 보내주신 실제 Referrer의 지도 URL로 직접 진입하여 완벽한 세션 환경 구축
+            target_map_url = "https://fin.land.naver.com/map?layer=NobwRAlgJmBcYAsD2BbApmANGAzmghgE4DGCACkfijnCAL50C6QA&center=3zmiiP-2ANqRH&zoom=18.858996210416944"
+            page.goto(target_map_url, wait_until="domcontentloaded", timeout=45000)
             page.wait_for_timeout(3000)
         except Exception as e:
-            print(f"지도 페이지 접속 경고 (속행): {e}")
+            print(f"진입 경고 (속행): {e}")
 
+        print("2. 최신 Fetch 헤더 및 페이로드로 API 요청 전송 중...")
         result = page.evaluate(
             """
             async ({url, payload}) => {
               const response = await fetch(url, {
                 method: "POST",
                 headers: {
-                  "Content-Type": "application/json",
-                  "Accept": "application/json, text/plain, */*",
-                  "Referer": "https://fin.land.naver.com/map"
+                  "accept": "application/json, text/plain, */*",
+                  "accept-language": "ko,en;q=0.9,en-US;q=0.8",
+                  "baggage": "sentry-environment=real,sentry-release=property-web%402026.08.05,sentry-public_key=ec5063b7741b4a9282a85c1e2f27ab09,sentry-trace_id=c0199be52fa64945be84d7a462bc9e12",
+                  "content-type": "application/json",
+                  "priority": "u=1, i",
+                  "sec-fetch-dest": "empty",
+                  "sec-fetch-mode": "cors",
+                  "sec-fetch-site": "same-origin",
+                  "sentry-trace": "c0199be52fa64945be84d7a462bc9e12-8d30ad718415b46d"
                 },
-                credentials: "include",
-                body: JSON.stringify(payload)
+                referrer: "https://fin.land.naver.com/map?layer=NobwRAlgJmBcYAsD2BbApmANGAzmghgE4DGCACkfijnCAL50C6QA&center=3zmiiP-2ANqRH&zoom=18.858996210416944",
+                body: JSON.stringify(payload),
+                credentials: "include"
               });
 
               const text = await response.text();
@@ -117,13 +116,13 @@ def main():
               };
             }
             """,
-            {"url": API_URL, "payload": payload}
+            {"url": API_URL, "payload": API_BODY}
         )
 
         print(f"STATUS: {result['status']}")
 
         if result['status'] == 200 and result['json']:
-            target_num = 3469
+            target_num = 3469  # 상봉우정
             complex_data = find_complex(result['json'], target_num)
             
             if complex_data:
