@@ -51,7 +51,6 @@ def find_complex(obj, target_complex_number):
 
 def main():
     with sync_playwright() as p:
-        # 봇 탐지 우회를 위해 추가 인자 설정
         browser = p.chromium.launch(
             headless=True,
             args=["--disable-blink-features=AutomationControlled"]
@@ -63,12 +62,12 @@ def main():
         )
         page = context.new_page()
         
-        print("1. 네이버 부동산 지도 페이지 우회 접속 중...")
-        try:
-            # domcontentloaded 대신 load나 대기 시간을 넉넉히 줍니다.
-            page.goto("https://land.naver.com/", wait_until="load", timeout=60000)
-        except Exception as e:
-            print(f"접속 경고 (무시하고 진행 시도): {e}")
+        print("1. 네이버 부동산 지도 페이지 접속 중...")
+        # 실제 API 도메인과 동일한 지도 페이지로 직접 진입하여 CORS 문제 해결
+        page.goto("https://fin.land.naver.com/map", wait_until="domcontentloaded", timeout=60000)
+        
+        # 페이지가 안정화되도록 잠시 대기
+        page.wait_for_timeout(3000)
 
         print("2. 페이지 세션 내에서 API POST 요청 전송 중...")
         result = page.evaluate(
