@@ -1,1 +1,4 @@
 playwright
+gspread
+oauth2client
+pytz
