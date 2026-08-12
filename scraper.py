@@ -1,10 +1,78 @@
 import json
+from datetime import datetime
+import pytz
 from playwright.sync_api import sync_playwright
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+import os
 
 API_URL = "https://fin.land.naver.com/front-api/v1/complex/complexClusters"
+SPREADSHEET_NAME = "네이버부동산_뷰카운터"  # 생성하신 구글 시트 파일 이름
+SHEET_TAB_NAME = "DATA"
 
-# 1. 추적할 단지 목록 정의 (상봉우정 외에 추가할 단지들을 이 리스트에 계속 확장하면 됩니다)
 TARGET_COMPLEXES = [
+    {
+        "name": "신당현대",
+        "id": 797,
+        "payload": {
+            "filter": {
+                "tradeTypes": ["A1", "B1"],
+                "realEstateTypes": ["A01", "A04", "B01"],
+                "roomCount": [],
+                "bathRoomCount": [],
+                "optionTypes": [],
+                "oneRoomShapeTypes": [],
+                "moveInTypes": [],
+                "filtersExclusiveSpace": False,
+                "floorTypes": [],
+                "directionTypes": [],
+                "hasArticlePhoto": False,
+                "isAuthorizedByOwner": False,
+                "parkingTypes": [],
+                "entranceTypes": [],
+                "hasArticle": False,
+            },
+            "boundingBox": {
+                "left": 127.02099123923551,
+                "right": 127.02283919886935,
+                "top": 37.56069520010895,
+                "bottom": 37.559652957889085,
+            },
+            "precision": 18.824369570126738,
+            "userChannelType": "PC",
+        }
+    },
+    {
+        "name": "중화한신",
+        "id": 824,
+        "payload": {
+            "filter": {
+                "tradeTypes": ["A1", "B1"],
+                "realEstateTypes": ["A01", "A04", "B01"],
+                "roomCount": [],
+                "bathRoomCount": [],
+                "optionTypes": [],
+                "oneRoomShapeTypes": [],
+                "moveInTypes": [],
+                "filtersExclusiveSpace": False,
+                "floorTypes": [],
+                "directionTypes": [],
+                "hasArticlePhoto": False,
+                "isAuthorizedByOwner": False,
+                "parkingTypes": [],
+                "entranceTypes": [],
+                "hasArticle": False,
+            },
+            "boundingBox": {
+                "left": 127.08211015510489,
+                "right": 127.08296315895547,
+                "top": 37.5974907670075,
+                "bottom": 37.597009915573636,
+            },
+            "precision": 19.939678652914548,
+            "userChannelType": "PC",
+        }
+    },
     {
         "name": "상봉우정",
         "id": 3469,
@@ -27,21 +95,46 @@ TARGET_COMPLEXES = [
                 "hasArticle": False,
             },
             "boundingBox": {
-                "left": 127.08735311730976,
-                "right": 127.0894130835772,
-                "top": 37.60024396982949,
-                "bottom": 37.598777071015576,
+                "left": 127.08837032558625,
+                "right": 127.0900657371709,
+                "top": 37.60007215171801,
+                "bottom": 37.59911645215416,
             },
-            "precision": 18.858996210416944,
+            "precision": 18.948667263440065,
             "userChannelType": "PC",
         }
     },
-    # 예시: 두 번째 단지를 추가하고 싶다면 아래와 같이 템플릿을 복사해서 채워넣으세요!
-    # {
-    #     "name": "추적할다른단지이름",
-    #     "id": 0000,
-    #     "payload": { ... (해당 위치의 boundingBox 및 설정) ... }
-    # }
+    {
+        "name": "행당신동아",
+        "id": 332,
+        "payload": {
+            "filter": {
+                "tradeTypes": ["A1", "B1"],
+                "realEstateTypes": ["A01", "A04", "B01"],
+                "roomCount": [],
+                "bathRoomCount": [],
+                "optionTypes": [],
+                "oneRoomShapeTypes": [],
+                "moveInTypes": [],
+                "filtersExclusiveSpace": False,
+                "floorTypes": [],
+                "directionTypes": [],
+                "hasArticlePhoto": False,
+                "isAuthorizedByOwner": False,
+                "parkingTypes": [],
+                "entranceTypes": [],
+                "hasArticle": False,
+            },
+            "boundingBox": {
+                "left": 127.0316359362094,
+                "right": 127.03447352540286,
+                "top": 37.554961001158745,
+                "bottom": 37.553360482467,
+            },
+            "precision": 18.205637072432747,
+            "userChannelType": "PC",
+        }
+    }
 ]
 
 
@@ -65,7 +158,23 @@ def find_complex(obj, target_complex_number):
     return None
 
 
+def get_previous_view_count(sheet, complex_number):
+    data = sheet.get_all_values()
+    if len(data) <= 1:
+        return None
+    
+    # 아래에서부터 거꾸로 탐색하여 해당 단지의 가장 최근 조회수 찾기
+    for row in reversed(data[1:]):
+        if len(row) > 3 and str(row[3]) == str(complex_number):
+            try:
+                return int(row[5])
+            except ValueError:
+                pass
+    return None
+
+
 def main():
+    # 1. 네이버 API 데이터 수집
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
@@ -96,19 +205,17 @@ def main():
         except Exception as e:
             print(f"진입 경고 (속행): {e}")
 
-        print("2. 타겟 단지 목록 순회 및 데이터 수집 시작...\n" + "="*40)
-
-        results_summary = []
+        print("2. 4개 타겟 단지 순회 및 데이터 수집 시작...\n" + "="*40)
+        collected_results = []
 
         for target in TARGET_COMPLEXES:
             target_name = target["name"]
             target_num = target["id"]
             api_payload = target["payload"]
 
-            print(f"🔍 조회 중인 단지: {target_name} (ID: {target_num})")
+            print(f"🔍 조회 중: {target_name} (ID: {target_num})")
 
             try:
-                # 브라우저 세션 내부에서 각 단지 페이로드를 담아 fetch 실행
                 result = page.evaluate(
                     """
                     async ({url, payload}) => {
@@ -135,8 +242,7 @@ def main():
 
                       return {
                         status: response.status,
-                        json: json,
-                        rawText: text
+                        json: json
                       };
                     }
                     """,
@@ -145,52 +251,96 @@ def main():
 
                 if result["status"] == 200 and result["json"]:
                     complex_data = find_complex(result["json"], target_num)
-
                     if complex_data:
                         complex_name = complex_data.get('complexName', target_name)
-                        view_count = complex_data.get('viewCount', '정보 없음')
-                        print(f"   [성공] 단지명: {complex_name} | viewCount(보는 중): {view_count}")
-                        
-                        results_summary.append({
-                            "name": complex_name,
-                            "id": target_num,
-                            "viewCount": view_count,
-                            "status": "SUCCESS"
-                        })
+                        view_count = complex_data.get('viewCount')
+                        if view_count is not None:
+                            print(f"   [성공] 단지명: {complex_name} | viewCount: {view_count}")
+                            collected_results.append({
+                                "id": target_num,
+                                "name": complex_name,
+                                "viewCount": int(view_count)
+                            })
+                        else:
+                            print(f"   [경고] viewCount 필드가 없습니다.")
                     else:
-                        print(f"   [경고] 응답 200이나, 해당 바운딩박스/구역 내에서 단지 번호 {target_num}를 찾지 못함.")
-                        results_summary.append({
-                            "name": target_name,
-                            "id": target_num,
-                            "viewCount": "N/A",
-                            "status": "NOT_FOUND_IN_RESPONSE"
-                        })
+                        print(f"   [경고] 영역 내에서 단지 번호 {target_num}를 찾지 못함.")
                 else:
                     print(f"   [실패] API 응답 오류 (Status: {result['status']})")
-                    results_summary.append({
-                        "name": target_name,
-                        "id": target_num,
-                        "viewCount": "N/A",
-                        "status": f"HTTP_{result['status']}"
-                    })
-
-            except Exception as evaluate_error:
-                print(f"   [에러] 예외 발생: {evaluate_error}")
-                results_summary.append({
-                    "name": target_name,
-                    "id": target_num,
-                    "viewCount": "N/A",
-                    "status": "ERROR"
-                })
+            except Exception as e:
+                print(f"   [에러] 예외 발생: {e}")
 
             print("-" * 40)
 
         browser.close()
 
-        # 최종 요약 출력
-        print("\n📊 [최종 수집 결과 요약]")
-        for item in results_summary:
-            print(f"- 단지명: {item['name']} (ID: {item['id']}) | 조회수(viewCount): {item['viewCount']} | 상태: {item['status']}")
+    if not collected_results:
+        print("❌ 수집된 데이터가 없어 구글 시트 업데이트를 건너뜁니다.")
+        return
+
+    # 2. 구글 시트 연동 및 기록
+    print("\n3. 구글 시트 연동 및 데이터 기록 중...")
+    try:
+        # GitHub Secrets에 저장된 인증 정보를 임시 파일로 생성
+        key_json_path = "credentials.json"
+        key_content = os.environ.get("GCP_SERVICE_ACCOUNT_KEY")
+        if not key_content:
+            raise ValueError("GCP_SERVICE_ACCOUNT_KEY 환경 변수가 설정되지 않았습니다.")
+        
+        with open(key_json_path, "w", encoding="utf-8") as f:
+            f.write(key_content)
+
+        scope = [
+            "https://spreadsheets.google.com/feeds",
+            "https://www.googleapis.com/auth/drive"
+        ]
+        creds = ServiceAccountCredentials.from_json_keyfile_name(key_json_path, scope)
+        client = gspread.authorize(creds)
+
+        # 구글 시트 파일 열기
+        spreadsheet = client.open(SPREADSHEET_NAME)
+        sheet = spreadsheet.worksheet(SHEET_TAB_NAME)
+
+        # 시간 설정 (KST)
+        kst = pytz.timezone("Asia/Seoul")
+        now = datetime.now(kst)
+        collected_at = now.strftime("%Y-%m-%d %H:%M:%S")
+        date_str = now.strftime("%Y-%m-%d")
+        time_str = now.strftime("%H:%M")
+
+        for item in collected_results:
+            complex_num = item["id"]
+            complex_name = item["name"]
+            view_count = item["viewCount"]
+
+            # 직전 조회수 가져오기
+            prev_view = get_previous_view_count(sheet, complex_num)
+            
+            delta = ""
+            if prev_view is not None:
+                delta = view_count - prev_view
+
+            # 시트에 행 추가 (수집일시, 날짜, 시간, complexNumber, 단지명, viewCount, 직전viewCount, 증가량)
+            sheet.append_row([
+                collected_at,
+                date_str,
+                time_str,
+                complex_num,
+                complex_name,
+                view_count,
+                prev_view if prev_view is not None else "",
+                delta
+            ])
+            print(f"   [시트 기록 완료] {complex_name} (현재: {view_count}, 직전: {prev_view}, 증가량: {delta})")
+
+        # 임시 인증 파일 삭제
+        if os.path.exists(key_json_path):
+            os.remove(key_json_path)
+
+        print("\n🎉 모든 작업이 성공적으로 완료되었습니다!")
+
+    except Exception as sheet_error:
+        print(f"❌ 구글 시트 기록 중 에러 발생: {sheet_error}")
 
 
 if __name__ == "__main__":
