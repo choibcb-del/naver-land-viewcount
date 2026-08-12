@@ -12,7 +12,6 @@ from playwright.sync_api import sync_playwright
 SPREADSHEET_NAME = "네이버부동산_뷰카운터"
 SHEET_TAB_NAME = "DATA"
 
-# 아파트 단지 기본 ID 목록 (디렉트 조회용으로 가볍게 압축)
 TARGET_COMPLEXES = [
     {"name": "신당현대", "id": 797},
     {"name": "중화한신", "id": 824},
@@ -27,14 +26,11 @@ def find_view_count_deep(obj):
     """JSON 데이터를 이 잡듯 뒤져서 대소문자 상관없이 viewcount 관련 숫자를 파내어 반환합니다."""
     if isinstance(obj, dict):
         for key, value in obj.items():
-            # 네이버가 viewCount 또는 viewcount 등 어떻게 보냈어도 매칭되도록 대소문자 통합 검사
             if key.lower() == "viewcount" and value is not None:
                 try:
                     return int(value)
                 except (ValueError, TypeError):
                     pass
-            
-            # 더 깊은 곳 탐색
             res = find_view_count_deep(value)
             if res is not None:
                 return res
@@ -54,7 +50,7 @@ def get_previous_view_count(sheet, complex_number):
         for row in reversed(data[1:]):
             if len(row) > 3 and str(row[3]) == str(complex_number):
                 try:
-                    return int(row[5]) # F열 (6번째 열)
+                    return int(row[5])  # F열 (6번째 열)
                 except (ValueError, IndexError):
                     pass
     except Exception:
@@ -65,15 +61,14 @@ def get_previous_view_count(sheet, complex_number):
 # 3. 핵심 실행 함수 (Main Function)
 # ==========================================
 def main():
-    # --- [Step 1] 네이버 API 데이터 수집 ---
+    # --- [Step 1] 네이버 API 데이터 수집 (CORS 우회 네트워크 버전) ---
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-web-security"
+                "--disable-dev-shm-usage"
             ],
         )
 
@@ -83,64 +78,41 @@ def main():
             timezone_id="Asia/Seoul",
         )
 
-        context.add_init_script(
-            """
-            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-            window.chrome = { runtime: {} };
-            Object.defineProperty(navigator, 'plugins', {get: () => []});
-            """
-        )
-
         page = context.new_page()
 
-        print("1. 네이버 부동산 웹 세션 초기화 진입...")
+        print("1. 네이버 부동산 정식 세션 연결 및 보안 쿠키 수집 중...")
         try:
-            # 기본 지도를 정식으로 띄워 네이버가 로봇이 아니라고 믿게 만듭니다.
-            page.goto("https://naver.com", wait_until="networkidle", timeout=60000)
-            page.wait_for_timeout(3000)
+            # 먼저 실제 웹 페이지를 정식으로 열어 브라우저 컨텍스트 내부에 쿠키와 세션을 확실하게 적재합니다.
+            page.goto("https://fin.land.naver.com/", wait_until="commit", timeout=40000)
+            page.wait_for_timeout(2000)
         except Exception as e:
             print(f"진입 경고 (속행): {e}")
 
-        print("2. 4개 타겟 단지 데이터 정밀 추적 시작...\n" + "="*40)
+        print("2. 4개 타겟 단지 네트워크 우회 조회 및 조회수 수집 시작...\n" + "="*40)
         collected_results = []
 
         for target in TARGET_COMPLEXES:
             target_name = target["name"]
             target_num = target["id"]
             
-            # 네이버 부동산 프론트엔드가 상세창을 열 때 쏘는 진짜 직통 상세정보 API 엔드포인트 주소입니다.
+            # 단지 정보를 관리하는 정확한 상세 API 엔드포인트 경로
             direct_api_url = f"https://naver.com{target_num}"
             print(f"🔍 조회 중: {target_name} (ID: {target_num})")
 
             try:
-                result = page.evaluate(
-                    """
-                    async (url) => {
-                      try {
-                        const response = await fetch(url, {
-                          method: "GET",
-                          headers: {
-                            "accept": "application/json, text/plain, */*",
-                            "accept-language": "ko,en-US;q=0.9,en;q=0.8",
-                            "sec-fetch-dest": "empty",
-                            "sec-fetch-mode": "cors",
-                            "sec-fetch-site": "same-origin"
-                          }
-                        });
-                        const text = await response.text();
-                        let json = null;
-                        try { json = JSON.parse(text); } catch (e) {}
-                        return { status: response.status, rawText: text, json: json };
-                      } catch (err) {
-                        return { status: 0, error: err.toString() };
-                      }
+                # [핵심 변경] 브라우저 내부 자바스크립트(fetch) 대신 Playwright 자체 네트워크 시스템으로 직통 GET 요청
+                response = context.request.get(
+                    direct_api_url,
+                    headers={
+                        "Accept": "application/json, text/plain, */*",
+                        "Accept-Language": "ko,en-US;q=0.9,en;q=0.8",
+                        "Referer": "https://fin.land.naver.com/",
+                        "Origin": "https://fin.land.naver.com"
                     }
-                    """,
-                    direct_api_url
                 )
 
-                if result and result.get("status") == 200:
-                    json_data = result.get("json")
+                if response.status == 200:
+                    json_data = response.json()
                     view_count = find_view_count_deep(json_data)
                     
                     if view_count is not None:
@@ -151,15 +123,12 @@ def main():
                             "viewCount": int(view_count)
                         })
                     else:
-                        print(f"   [경고] 200 OK 응답을 받았으나 내부에서 viewCount 숫자를 찾지 못했습니다.")
-                        # 에러 분석용: 서버가 보낸 원본 텍스트의 앞부분 일부를 로그로 노출시킵니다.
-                        raw_text = result.get("rawText", "")
-                        print(f"   [서버 실제 응답 요약]: {raw_text[:200]}")
+                        print(f"   [경고] 응답 성공(200)했으나 데이터 구조 내부에 viewCount 필드가 존재하지 않습니다.")
+                        print(f"   [서버 응답 요약]: {response.text()[:200]}")
                 else:
-                    err_msg = result.get('error', f"상태 코드: {result.get('status')}") if result else "응답 없음"
-                    print(f"   [실패] 네이버 응답 차단 또는 실패 ({err_msg})")
+                    print(f"   [실패] 네이버 서버 응답 거부 (상태 코드: {response.status})")
             except Exception as e:
-                print(f"   [에러] 예외 발생: {e}")
+                print(f"   [에러] 네트워크 예외 발생: {e}")
 
             print("-" * 40)
 
