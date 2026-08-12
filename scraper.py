@@ -1,14 +1,17 @@
+import os
 import json
 from datetime import datetime
 import pytz
-from playwright.sync_api import sync_playwright
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-import os
+import requests
 
-API_URL = "https://fin.land.naver.com/front-api/v1/complex/complexClusters"
-SPREADSHEET_NAME = "네이버부동산_뷰카운터"  # 생성하신 구글 시트 파일 이름
-SHEET_TAB_NAME = "DATA"
+# ==========================================
+# 1. 설정값 (Constants)
+# ==========================================
+API_URL = "https://naver.com"
+SPREADSHEET_NAME = "네이버부동산_뷰카운터"  # 구글 시트 파일 이름
+SHEET_TAB_NAME = "DATA"                     # 구글 시트 탭 이름
 
 TARGET_COMPLEXES = [
     {
@@ -137,7 +140,9 @@ TARGET_COMPLEXES = [
     }
 ]
 
-
+# ==========================================
+# 2. 보조 도구 함수 (Helper Functions)
+# ==========================================
 def find_complex(obj, target_complex_number):
     if isinstance(obj, dict):
         if "complexNumber" in obj:
@@ -163,7 +168,6 @@ def get_previous_view_count(sheet, complex_number):
     if len(data) <= 1:
         return None
     
-    # 아래에서부터 거꾸로 탐색하여 해당 단지의 가장 최근 조회수 찾기
     for row in reversed(data[1:]):
         if len(row) > 3 and str(row[3]) == str(complex_number):
             try:
@@ -172,116 +176,77 @@ def get_previous_view_count(sheet, complex_number):
                 pass
     return None
 
-
+# ==========================================
+# 3. 핵심 실행 함수 (Main Function)
+# ==========================================
 def main():
-    # 1. 네이버 API 데이터 수집
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-            ],
-        )
+    # --- [Step 1] 네이버 세션 생성 및 안전한 헤더 설정 ---
+    session = requests.Session()
+    
+    # 실제 일반 브라우저처럼 보이게 만드는 필수 헤더 정보
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "ko,en-US;q=0.9,en;q=0.8",
+        "Content-Type": "application/json",
+        "Origin": "https://fin.land.naver.com",
+        "Referer": "https://naver.com",
+    }
+    session.headers.update(headers)
 
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            locale="ko-KR",
-            timezone_id="Asia/Seoul",
-        )
+    print("1. 네이버 부동산 기본 세션 초기화 완료 (메인 페이지 우회 진입)")
+    try:
+        # 가볍게 메인 홈을 먼저 들러 쿠키 값을 백그라운드에서 자동 수집합니다.
+        session.get("https://fin.land.naver.com/", timeout=15)
+    except Exception as e:
+        print(f"진입 경고 (속행): {e}")
 
-        context.add_init_script(
-            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
-        )
+    print("2. 4개 타겟 단지 순회 및 데이터 수집 시작...\n" + "="*40)
+    collected_results = []
 
-        page = context.new_page()
+    for target in TARGET_COMPLEXES:
+        target_name = target["name"]
+        target_num = target["id"]
+        api_payload = target["payload"]
 
-        print("1. 네이버 부동산 기본 세션 진입 중...")
+        print(f"🔍 조회 중: {target_name} (ID: {target_num})")
+
         try:
-            base_url = "https://fin.land.naver.com/"
-            page.goto(base_url, wait_until="commit", timeout=40000)
-            page.wait_for_timeout(1500)
-        except Exception as e:
-            print(f"진입 경고 (속행): {e}")
+            # 브라우저를 켜지 않고 API에 직접 데이터를 쏘아 응답을 받아옵니다.
+            response = session.post(API_URL, json=api_payload, timeout=15)
 
-        print("2. 4개 타겟 단지 순회 및 데이터 수집 시작...\n" + "="*40)
-        collected_results = []
-
-        for target in TARGET_COMPLEXES:
-            target_name = target["name"]
-            target_num = target["id"]
-            api_payload = target["payload"]
-
-            print(f"🔍 조회 중: {target_name} (ID: {target_num})")
-
-            try:
-                result = page.evaluate(
-                    """
-                    async ({url, payload}) => {
-                      const response = await fetch(url, {
-                        method: "POST",
-                        headers: {
-                          "accept": "application/json, text/plain, */*",
-                          "accept-language": "ko,en;q=0.9,en-US;q=0.8",
-                          "content-type": "application/json",
-                          "sec-fetch-dest": "empty",
-                          "sec-fetch-mode": "cors",
-                          "sec-fetch-site": "same-origin"
-                        },
-                        referrer: "https://fin.land.naver.com/map",
-                        body: JSON.stringify(payload),
-                        credentials: "include"
-                      });
-
-                      const text = await response.text();
-                      let json = null;
-                      try {
-                          json = JSON.parse(text);
-                      } catch (e) {}
-
-                      return {
-                        status: response.status,
-                        json: json
-                      };
-                    }
-                    """,
-                    {"url": API_URL, "payload": api_payload},
-                )
-
-                if result["status"] == 200 and result["json"]:
-                    complex_data = find_complex(result["json"], target_num)
-                    if complex_data:
-                        complex_name = complex_data.get('complexName', target_name)
-                        view_count = complex_data.get('viewCount')
-                        if view_count is not None:
-                            print(f"   [성공] 단지명: {complex_name} | viewCount: {view_count}")
-                            collected_results.append({
-                                "id": target_num,
-                                "name": complex_name,
-                                "viewCount": int(view_count)
-                            })
-                        else:
-                            print(f"   [경고] viewCount 필드가 없습니다.")
+            if response.status_code == 200:
+                json_data = response.json()
+                complex_data = find_complex(json_data, target_num)
+                
+                if complex_data:
+                    complex_name = complex_data.get('complexName', target_name)
+                    view_count = complex_data.get('viewCount')
+                    if view_count is not None:
+                        print(f"   [성공] 단지명: {complex_name} | viewCount: {view_count}")
+                        collected_results.append({
+                            "id": target_num,
+                            "name": complex_name,
+                            "viewCount": int(view_count)
+                        })
                     else:
-                        print(f"   [경고] 영역 내에서 단지 번호 {target_num}를 찾지 못함.")
+                        print(f"   [경고] viewCount 필드가 없습니다.")
                 else:
-                    print(f"   [실패] API 응답 오류 (Status: {result['status']})")
-            except Exception as e:
-                print(f"   [에러] 예외 발생: {e}")
+                    print(f"   [경고] 영역 내에서 단지 번호 {target_num}를 찾지 못함.")
+            else:
+                print(f"   [실패] API 응답 오류 (Status: {response.status_code})")
+        except Exception as e:
+            print(f"   [에러] 예외 발생: {e}")
 
-            print("-" * 40)
-
-        browser.close()
+        print("-" * 40)
 
     if not collected_results:
         print("❌ 수집된 데이터가 없어 구글 시트 업데이트를 건너뜁니다.")
         return
 
-    # 2. 구글 시트 연동 및 기록
+    # --- [Step 2] 구글 시트 연동 및 기록 ---
     print("\n3. 구글 시트 연동 및 데이터 기록 중...")
     try:
-        # GitHub Secrets에 저장된 인증 정보를 임시 파일로 생성
         key_json_path = "credentials.json"
         key_content = os.environ.get("GCP_SERVICE_ACCOUNT_KEY")
         if not key_content:
@@ -291,17 +256,15 @@ def main():
             f.write(key_content)
 
         scope = [
-            "https://spreadsheets.google.com/feeds",
-            "https://www.googleapis.com/auth/drive"
+            "https://google.com",
+            "https://googleapis.com"
         ]
         creds = ServiceAccountCredentials.from_json_keyfile_name(key_json_path, scope)
         client = gspread.authorize(creds)
 
-        # 구글 시트 파일 열기
         spreadsheet = client.open(SPREADSHEET_NAME)
         sheet = spreadsheet.worksheet(SHEET_TAB_NAME)
 
-        # 시간 설정 (KST)
         kst = pytz.timezone("Asia/Seoul")
         now = datetime.now(kst)
         collected_at = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -313,14 +276,12 @@ def main():
             complex_name = item["name"]
             view_count = item["viewCount"]
 
-            # 직전 조회수 가져오기
             prev_view = get_previous_view_count(sheet, complex_num)
             
             delta = ""
             if prev_view is not None:
                 delta = view_count - prev_view
 
-            # 시트에 행 추가 (수집일시, 날짜, 시간, complexNumber, 단지명, viewCount, 직전viewCount, 증가량)
             sheet.append_row([
                 collected_at,
                 date_str,
@@ -331,17 +292,4 @@ def main():
                 prev_view if prev_view is not None else "",
                 delta
             ])
-            print(f"   [시트 기록 완료] {complex_name} (현재: {view_count}, 직전: {prev_view}, 증가량: {delta})")
-
-        # 임시 인증 파일 삭제
-        if os.path.exists(key_json_path):
-            os.remove(key_json_path)
-
-        print("\n🎉 모든 작업이 성공적으로 완료되었습니다!")
-
-    except Exception as sheet_error:
-        print(f"❌ 구글 시트 기록 중 에러 발생: {sheet_error}")
-
-
-if __name__ == "__main__":
-    main()
+print(f"   [시트 기록 완료] {complex_name} (현재: {view_count}, 직전: {prev_view}, 증가량: {delta})")if os.path.exists(key_json_path):os.remove(key_json_path)print("\n🎉 모든 작업이 성공적으로 완료되었습니다!")except Exception as sheet_error:print(f"❌ 구글 시트 기록 중 에러 발생: {sheet_error}")if name == "main":main()
