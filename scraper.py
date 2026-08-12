@@ -231,7 +231,6 @@ def main():
             print(f"🔍 조회 중: {target_name} (ID: {target_num})")
 
             try:
-                # 지도 페이지가 활성화된 상태에서 브라우저 내부 Context를 빌려 안전하게 API를 호출합니다.
                 result = page.evaluate(
                     """
                     async ({url, payload}) => {
@@ -262,7 +261,8 @@ def main():
                     {"url": API_URL, "payload": api_payload},
                 )
 
-                if result.get("status") == 200 and result.get("json"):
+                # 파이썬 딕셔너리 안전 검사 및 조건문 들여쓰기 완벽 수정
+                if result and result.get("status") == 200 and result.get("json"):
                     complex_data = find_complex(result["json"], target_num)
                     if complex_data:
                         complex_name = complex_data.get('complexName', target_name)
@@ -274,14 +274,14 @@ def main():
                                 "name": complex_name,
                                 "viewCount": int(view_count)
                             })
-    else:
+                        else:
                             print(f"   [경고] viewCount 필드가 없습니다.")
                     else:
                         print(f"   [경고] 영역 내에서 단지 번호 {target_num}를 찾지 못함.")
                 else:
-                    err_msg = result.get('error', f"상태 코드: {result.get('status')}")
+                    err_msg = result.get('error', f"상태 코드: {result.get('status')}") if result else "결과 없음"
                     print(f"   [실패] 데이터 반환 문제 ({err_msg})")
-                    if "rawText" in result and len(result["rawText"]) < 200:
+                    if result and "rawText" in result and len(result["rawText"]) < 200:
                         print(f"   [서버 응답 내용]: {result['rawText']}")
             except Exception as e:
                 print(f"   [에러] 예외 발생: {e}")
@@ -291,7 +291,7 @@ def main():
         browser.close()
 
     if not collected_results:
-        print("❌ 수집된 데이터가 없어 구글 시트 업데이트를 건너뜁니다.")
+        print("❌ 수집된 데이터가 없어 구글 시트 업데이트를 건너뜜.")
         return
 
     # --- [Step 2] 구글 시트 연동 및 기록 ---
