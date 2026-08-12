@@ -51,30 +51,45 @@ def find_complex(obj, target_complex_number):
 
 def main():
     with sync_playwright() as p:
+        # 자동화 탐지(navigator.webdriver)를 완전히 숨기는 옵션 적용
         browser = p.chromium.launch(
             headless=True,
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--no-sandbox",
-                "--disable-setuid-sandbox"
+                "--disable-dev-shm-usage",
+                "--disable-gpu"
             ]
         )
+        
         context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
             locale="ko-KR",
             timezone_id="Asia/Seoul",
-            extra_http_headers={
-                "Referer": "https://fin.land.naver.com/map",
-                "Origin": "https://fin.land.naver.com"
-            }
+            viewport={"width": 1920, "height": 1080}
         )
+        
+        # 봇 탐지 우회 스크립트 주입
+        context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined});")
+        
         page = context.new_page()
         
-        print("1. 빈 세션 페이지 초기화 중...")
-        # 직접 네이버에 접속하는 대신 빈 페이지를 띄워 차단(Connection Reset)을 회피합니다.
-        page.goto("about:blank")
+        print("1. 네이버 부동산 메인 세션 초기화 접속 중...")
+        try:
+            # 연결 리셋을 피하기 위해 네이버 부동산 메인으로 부드럽게 진입
+            page.goto("https://land.naver.com/", wait_until="domcontentloaded", timeout=45000)
+            page.wait_for_timeout(3000) # 세션 쿠키 발급 대기
+        except Exception as e:
+            print(f"메인 접속 경고 (속행): {e}")
 
-        print("2. 세션 권한으로 API 직접 POST 요청 전송 중...")
+        print("2. API 도메인 세션으로 이동 및 API POST 요청 전송 중...")
+        # API가 요구하는 출처(Origin) 세션을 맞추기 위해 지도 페이지로 이동 후 fetch 수행
+        try:
+            page.goto("https://fin.land.naver.com/map", wait_until="domcontentloaded", timeout=45000)
+            page.wait_for_timeout(3000)
+        except Exception as e:
+            print(f"지도 페이지 접속 경고 (속행): {e}")
+
         result = page.evaluate(
             """
             async ({url, payload}) => {
@@ -82,7 +97,8 @@ def main():
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
-                  "Accept": "application/json, text/plain, */*"
+                  "Accept": "application/json, text/plain, */*",
+                  "Referer": "https://fin.land.naver.com/map"
                 },
                 credentials: "include",
                 body: JSON.stringify(payload)
