@@ -292,4 +292,18 @@ def main():
                 prev_view if prev_view is not None else "",
                 delta
             ])
-print(f"   [시트 기록 완료] {complex_name} (현재: {view_count}, 직전: {prev_view}, 증가량: {delta})")if os.path.exists(key_json_path):os.remove(key_json_path)print("\n🎉 모든 작업이 성공적으로 완료되었습니다!")except Exception as sheet_error:print(f"❌ 구글 시트 기록 중 에러 발생: {sheet_error}")if name == "main":main()
+
+            print(f"   [시트 기록 완료] {complex_name} (현재: {view_count}, 직전: {prev_view}, 증가량: {delta})")
+
+        # 임시 인증 json 파일이 남아있다면 안전하게 삭제합니다
+        if os.path.exists(key_json_path):
+            os.remove(key_json_path)
+
+        print("\n🎉 모든 작업이 성공적으로 완료되었습니다!")
+
+    except Exception as sheet_error:
+        print(f"❌ 구글 시트 기록 중 에러 발생: {sheet_error}")
+
+
+if __name__ == "__main__":
+    main()
