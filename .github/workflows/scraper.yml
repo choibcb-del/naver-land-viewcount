@@ -1,0 +1,32 @@
+name: Naver Realestate Scraper
+
+on:
+  schedule:
+    # 매일 특정 시간에 자동 실행 (UTC 기준이므로 한국 시간보다 9시간 느림)
+    # 예시: 매일 오전 9시 (한국 시간 기준 저녁 6시)에 실행하고 싶다면 아래와 같이 설정
+    - cron: '0 9 * * *'
+  workflow_dispatch: # 수동으로도 실행할 수 있게 해주는 버튼
+
+jobs:
+  run-scraper:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 깃허브 코드 가져오기
+        uses: actions/checkout@v4
+
+      - name: 파이썬 세팅
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: 필수 라이브러리 및 크롬(Playwright) 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          playwright install chromium
+
+      - name: 스크래퍼 실행
+        env:
+          GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+        run: |
+          python scraper.py
