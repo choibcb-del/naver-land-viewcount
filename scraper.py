@@ -53,23 +53,28 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
-            args=["--disable-blink-features=AutomationControlled"]
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-setuid-sandbox"
+            ]
         )
         context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             locale="ko-KR",
-            timezone_id="Asia/Seoul"
+            timezone_id="Asia/Seoul",
+            extra_http_headers={
+                "Referer": "https://fin.land.naver.com/map",
+                "Origin": "https://fin.land.naver.com"
+            }
         )
         page = context.new_page()
         
-        print("1. 네이버 부동산 지도 페이지 접속 중...")
-        # 실제 API 도메인과 동일한 지도 페이지로 직접 진입하여 CORS 문제 해결
-        page.goto("https://fin.land.naver.com/map", wait_until="domcontentloaded", timeout=60000)
-        
-        # 페이지가 안정화되도록 잠시 대기
-        page.wait_for_timeout(3000)
+        print("1. 빈 세션 페이지 초기화 중...")
+        # 직접 네이버에 접속하는 대신 빈 페이지를 띄워 차단(Connection Reset)을 회피합니다.
+        page.goto("about:blank")
 
-        print("2. 페이지 세션 내에서 API POST 요청 전송 중...")
+        print("2. 세션 권한으로 API 직접 POST 요청 전송 중...")
         result = page.evaluate(
             """
             async ({url, payload}) => {
@@ -113,7 +118,7 @@ def main():
                 print(f"[실패] 응답은 200이지만 JSON 내부에서 complexNumber {target_num}을 찾지 못했습니다.")
         else:
             print("[실패] API 호출이 정상 Status 200을 반환하지 않았거나 JSON 파싱에 실패했습니다.")
-            print(result['rawText'][:200])
+            print(result['rawText'][:300])
 
         browser.close()
 
