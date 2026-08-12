@@ -51,14 +51,24 @@ def find_complex(obj, target_complex_number):
 
 def main():
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page(
+        # 봇 탐지 우회를 위해 추가 인자 설정
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--disable-blink-features=AutomationControlled"]
+        )
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             locale="ko-KR",
             timezone_id="Asia/Seoul"
         )
+        page = context.new_page()
         
-        print("1. 네이버 부동산 메인 페이지 접속 중...")
-        page.goto("https://fin.land.naver.com", wait_until="domcontentloaded")
+        print("1. 네이버 부동산 지도 페이지 우회 접속 중...")
+        try:
+            # domcontentloaded 대신 load나 대기 시간을 넉넉히 줍니다.
+            page.goto("https://land.naver.com/", wait_until="load", timeout=60000)
+        except Exception as e:
+            print(f"접속 경고 (무시하고 진행 시도): {e}")
 
         print("2. 페이지 세션 내에서 API POST 요청 전송 중...")
         result = page.evaluate(
