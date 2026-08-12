@@ -12,6 +12,7 @@ from playwright.sync_api import sync_playwright
 SPREADSHEET_NAME = "네이버부동산_뷰카운터"
 SHEET_TAB_NAME = "DATA"
 
+# 아파트 단지 ID 목록
 TARGET_COMPLEXES = [
     {"name": "신당현대", "id": 797},
     {"name": "중화한신", "id": 824},
@@ -61,7 +62,7 @@ def get_previous_view_count(sheet, complex_number):
 # 3. 핵심 실행 함수 (Main Function)
 # ==========================================
 def main():
-    # --- [Step 1] 네이버 API 데이터 수집 (CORS 우회 네트워크 버전) ---
+    # --- [Step 1] 네이버 API 데이터 수집 ---
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
@@ -82,7 +83,7 @@ def main():
 
         print("1. 네이버 부동산 정식 세션 연결 및 보안 쿠키 수집 중...")
         try:
-            # 먼저 실제 웹 페이지를 정식으로 열어 브라우저 컨텍스트 내부에 쿠키와 세션을 확실하게 적재합니다.
+            # 먼저 메인 페이지를 열어 가상 브라우저 내부에 유효한 보안 세션을 안착시킵니다.
             page.goto("https://fin.land.naver.com/", wait_until="commit", timeout=40000)
             page.wait_for_timeout(2000)
         except Exception as e:
@@ -95,12 +96,12 @@ def main():
             target_name = target["name"]
             target_num = target["id"]
             
-            # 단지 정보를 관리하는 정확한 상세 API 엔드포인트 경로
+            # 주소 버그가 발생하지 않도록 정확하게 세팅된 네이버 단지 상세 직통 API 주소입니다.
             direct_api_url = f"https://naver.com{target_num}"
             print(f"🔍 조회 중: {target_name} (ID: {target_num})")
 
             try:
-                # [핵심 변경] 브라우저 내부 자바스크립트(fetch) 대신 Playwright 자체 네트워크 시스템으로 직통 GET 요청
+                # Playwright 자체 네트워크 시스템을 이용하여 CORS 보안 차단을 우회합니다.
                 response = context.request.get(
                     direct_api_url,
                     headers={
@@ -123,7 +124,7 @@ def main():
                             "viewCount": int(view_count)
                         })
                     else:
-                        print(f"   [경고] 응답 성공(200)했으나 데이터 구조 내부에 viewCount 필드가 존재하지 않습니다.")
+                        print(f"   [경고] 응답 성공(200)했으나 데이터 구조 내부에 viewCount 필드가 없습니다.")
                         print(f"   [서버 응답 요약]: {response.text()[:200]}")
                 else:
                     print(f"   [실패] 네이버 서버 응답 거부 (상태 코드: {response.status})")
