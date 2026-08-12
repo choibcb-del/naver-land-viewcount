@@ -200,7 +200,7 @@ def main():
         print("1. 네이버 부동산 기본 세션 진입 중...")
         try:
             base_url = "https://fin.land.naver.com/"
-            page.goto(base_url, wait_until="commit", timeout=20000)
+            page.goto(base_url, wait_until="commit", timeout=40000)
             page.wait_for_timeout(1500)
         except Exception as e:
             print(f"진입 경고 (속행): {e}")
