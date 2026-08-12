@@ -3,34 +3,46 @@ from playwright.sync_api import sync_playwright
 
 API_URL = "https://fin.land.naver.com/front-api/v1/complex/complexClusters"
 
-# 보내주신 최신 Copy as fetch의 body 데이터
-API_BODY = {
-    "filter": {
-        "tradeTypes": ["A1", "B1"],
-        "realEstateTypes": ["A01", "A04", "B01"],
-        "roomCount": [],
-        "bathRoomCount": [],
-        "optionTypes": [],
-        "oneRoomShapeTypes": [],
-        "moveInTypes": [],
-        "filtersExclusiveSpace": False,
-        "floorTypes": [],
-        "directionTypes": [],
-        "hasArticlePhoto": False,
-        "isAuthorizedByOwner": False,
-        "parkingTypes": [],
-        "entranceTypes": [],
-        "hasArticle": False,
+# 1. 추적할 단지 목록 정의 (상봉우정 외에 추가할 단지들을 이 리스트에 계속 확장하면 됩니다)
+TARGET_COMPLEXES = [
+    {
+        "name": "상봉우정",
+        "id": 3469,
+        "payload": {
+            "filter": {
+                "tradeTypes": ["A1", "B1"],
+                "realEstateTypes": ["A01", "A04", "B01"],
+                "roomCount": [],
+                "bathRoomCount": [],
+                "optionTypes": [],
+                "oneRoomShapeTypes": [],
+                "moveInTypes": [],
+                "filtersExclusiveSpace": False,
+                "floorTypes": [],
+                "directionTypes": [],
+                "hasArticlePhoto": False,
+                "isAuthorizedByOwner": False,
+                "parkingTypes": [],
+                "entranceTypes": [],
+                "hasArticle": False,
+            },
+            "boundingBox": {
+                "left": 127.08735311730976,
+                "right": 127.0894130835772,
+                "top": 37.60024396982949,
+                "bottom": 37.598777071015576,
+            },
+            "precision": 18.858996210416944,
+            "userChannelType": "PC",
+        }
     },
-    "boundingBox": {
-        "left": 127.08735311730976,
-        "right": 127.0894130835772,
-        "top": 37.60024396982949,
-        "bottom": 37.598777071015576,
-    },
-    "precision": 18.858996210416944,
-    "userChannelType": "PC",
-}
+    # 예시: 두 번째 단지를 추가하고 싶다면 아래와 같이 템플릿을 복사해서 채워넣으세요!
+    # {
+    #     "name": "추적할다른단지이름",
+    #     "id": 0000,
+    #     "payload": { ... (해당 위치의 boundingBox 및 설정) ... }
+    # }
+]
 
 
 def find_complex(obj, target_complex_number):
@@ -78,84 +90,107 @@ def main():
 
         print("1. 네이버 부동산 기본 세션 진입 중...")
         try:
-            # [수정] 지도 레이어 로딩이 없는 아주 가벼운 기본 주소로 진입하여 쿠키/세션만 구워냅니다.
-            # wait_until도 가장 가벼운 "commit"을 주어 에러를 원천 차단합니다.
             base_url = "https://fin.land.naver.com/"
             page.goto(base_url, wait_until="commit", timeout=20000)
             page.wait_for_timeout(1500)
         except Exception as e:
             print(f"진입 경고 (속행): {e}")
 
-        print("2. 최신 Fetch 헤더 및 페이로드로 API 요청 전송 중...")
-        try:
-            result = page.evaluate(
-                """
-                async ({url, payload}) => {
-                  const response = await fetch(url, {
-                    method: "POST",
-                    headers: {
-                      "accept": "application/json, text/plain, */*",
-                      "accept-language": "ko,en;q=0.9,en-US;q=0.8",
-                      "content-type": "application/json",
-                      "sec-fetch-dest": "empty",
-                      "sec-fetch-mode": "cors",
-                      "sec-fetch-site": "same-origin"
-                    },
-                    referrer: "https://fin.land.naver.com/map",
-                    body: JSON.stringify(payload),
-                    credentials: "include"
-                  });
+        print("2. 타겟 단지 목록 순회 및 데이터 수집 시작...\n" + "="*40)
 
-                  const text = await response.text();
-                  let json = null;
-                  try {
-                      json = JSON.parse(text);
-                  } catch (e) {}
+        results_summary = []
 
-                  return {
-                    status: response.status,
-                    json: json,
-                    rawText: text
-                  };
-                }
-                """,
-                {"url": API_URL, "payload": API_BODY},
-            )
+        for target in TARGET_COMPLEXES:
+            target_name = target["name"]
+            target_num = target["id"]
+            api_payload = target["payload"]
 
-            print(f"STATUS: {result['status']}")
+            print(f"🔍 조회 중인 단지: {target_name} (ID: {target_num})")
 
-            if result["status"] == 200 and result["json"]:
-                target_num = 3469  # 상봉우정
-                complex_data = find_complex(result["json"], target_num)
+            try:
+                # 브라우저 세션 내부에서 각 단지 페이로드를 담아 fetch 실행
+                result = page.evaluate(
+                    """
+                    async ({url, payload}) => {
+                      const response = await fetch(url, {
+                        method: "POST",
+                        headers: {
+                          "accept": "application/json, text/plain, */*",
+                          "accept-language": "ko,en;q=0.9,en-US;q=0.8",
+                          "content-type": "application/json",
+                          "sec-fetch-dest": "empty",
+                          "sec-fetch-mode": "cors",
+                          "sec-fetch-site": "same-origin"
+                        },
+                        referrer: "https://fin.land.naver.com/map",
+                        body: JSON.stringify(payload),
+                        credentials: "include"
+                      });
 
-                if complex_data:
-                    print(f"[성공] 단지 발견: complexNumber={target_num}")
-                    print(
-                        f"단지명: {complex_data.get('complexName', '이름없음')}"
-                    )
-                    # 실제 변수명이 보려는 인원수 혹은 조회수 데이터인지 체크해 줍니다.
-                    print(
-                        f"viewCount (보는 중): {complex_data.get('viewCount', '정보 없음')}"
-                    )
-                else:
-                    print(
-                        f"[실패] 응답은 성공했으나 데이터 내부에서 단지 번호 {target_num}를 찾지 못했습니다."
-                    )
-                    print(
-                        "현재 받아온 전체 JSON 데이터 키 구조:",
-                        list(result["json"].keys()),
-                    )
-            else:
-                print(
-                    "[실패] API 응답코드가 200이 아니거나 올바른 데이터가 아닙니다."
+                      const text = await response.text();
+                      let json = null;
+                      try {
+                          json = JSON.parse(text);
+                      } catch (e) {}
+
+                      return {
+                        status: response.status,
+                        json: json,
+                        rawText: text
+                      };
+                    }
+                    """,
+                    {"url": API_URL, "payload": api_payload},
                 )
-                print(result["rawText"][:300])
 
-        except Exception as evaluate_error:
-            print(f"❌ 데이터 추출 단계 최종 에러 발생: {evaluate_error}")
+                if result["status"] == 200 and result["json"]:
+                    complex_data = find_complex(result["json"], target_num)
 
-        finally:
-            browser.close()
+                    if complex_data:
+                        complex_name = complex_data.get('complexName', target_name)
+                        view_count = complex_data.get('viewCount', '정보 없음')
+                        print(f"   [성공] 단지명: {complex_name} | viewCount(보는 중): {view_count}")
+                        
+                        results_summary.append({
+                            "name": complex_name,
+                            "id": target_num,
+                            "viewCount": view_count,
+                            "status": "SUCCESS"
+                        })
+                    else:
+                        print(f"   [경고] 응답 200이나, 해당 바운딩박스/구역 내에서 단지 번호 {target_num}를 찾지 못함.")
+                        results_summary.append({
+                            "name": target_name,
+                            "id": target_num,
+                            "viewCount": "N/A",
+                            "status": "NOT_FOUND_IN_RESPONSE"
+                        })
+                else:
+                    print(f"   [실패] API 응답 오류 (Status: {result['status']})")
+                    results_summary.append({
+                        "name": target_name,
+                        "id": target_num,
+                        "viewCount": "N/A",
+                        "status": f"HTTP_{result['status']}"
+                    })
+
+            except Exception as evaluate_error:
+                print(f"   [에러] 예외 발생: {evaluate_error}")
+                results_summary.append({
+                    "name": target_name,
+                    "id": target_num,
+                    "viewCount": "N/A",
+                    "status": "ERROR"
+                })
+
+            print("-" * 40)
+
+        browser.close()
+
+        # 최종 요약 출력
+        print("\n📊 [최종 수집 결과 요약]")
+        for item in results_summary:
+            print(f"- 단지명: {item['name']} (ID: {item['id']}) | 조회수(viewCount): {item['viewCount']} | 상태: {item['status']}")
 
 
 if __name__ == "__main__":
