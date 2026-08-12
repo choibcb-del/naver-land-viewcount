@@ -1,4 +1,3 @@
-text
 requests
 gspread
 oauth2client
