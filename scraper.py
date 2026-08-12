@@ -274,44 +274,84 @@ def main():
                                 "name": complex_name,
                                 "viewCount": int(view_count)
                             })
-                        else:
-print(f"   [경고] viewCount 필드가 없습니다.")
-else:print(f"   [경고] 영역 내에서 단지 번호 {target_num}를 찾지 못함.")
-else:err_msg = result.get('error', f"상태 코드: {result.get('status')}")
-print(f"   [실패] 데이터 반환 문제 ({err_msg})")
-if "rawText" in result and len(result["rawText"]) < 200:
-    print(f"   [서버 응답 내용]: {result['rawText']}")except Exception as e:
-    print(f"   [에러] 예외 발생: {e}")print("-" * 40)browser.close()
-    if not collected_results:print("❌ 수집된 데이터가 없어 구글 시트 업데이트를 건너뜁니다.")
-        return# --- [Step 2] 구글 시트 연동 및 기록 ---print("\n3. 구글 시트 연동 및 데이터 기록 중...")
-try:key_json_path = "credentials.json"key_content = os.environ.get("GCP_SERVICE_ACCOUNT_KEY")
-if not key_content:
-    raise ValueError("GCP_SERVICE_ACCOUNT_KEY 환경 변수가 설정되지 않았습니다.")
-with open(key_json_path, "w", encoding="utf-8") as f:
-    f.write(key_content)scope = ["google.com","googleapis.com"]
-creds = ServiceAccountCredentials.from_json_keyfile_name(key_json_path, scope)
-client = gspread.authorize(creds)
-spreadsheet = client.open(SPREADSHEET_NAME)
-sheet = spreadsheet.worksheet(SHEET_TAB_NAME)
-kst = pytz.timezone("Asia/Seoul")
-now = datetime.now(kst)
-collected_at = now.strftime("%Y-%m-%d %H:%M:%S")
-date_str = now.strftime("%Y-%m-%d")
-time_str = now.strftime("%H:%M")
+    else:
+                            print(f"   [경고] viewCount 필드가 없습니다.")
+                    else:
+                        print(f"   [경고] 영역 내에서 단지 번호 {target_num}를 찾지 못함.")
+                else:
+                    err_msg = result.get('error', f"상태 코드: {result.get('status')}")
+                    print(f"   [실패] 데이터 반환 문제 ({err_msg})")
+                    if "rawText" in result and len(result["rawText"]) < 200:
+                        print(f"   [서버 응답 내용]: {result['rawText']}")
+            except Exception as e:
+                print(f"   [에러] 예외 발생: {e}")
 
-for item in collected_results:
-    complex_num = item["id"]
-complex_name = item["name"]
-view_count = item["viewCount"]
-prev_view = get_previous_view_count(sheet, complex_num)
-delta = ""
-if prev_view is not None:
-    delta = view_count - prev_view
-sheet.append_row([collected_at,date_str,time_str,complex_num,complex_name,view_count,prev_view if prev_view is not None else "",delta])
-print(f"   [시트 기록 완료] {complex_name} (현재: {view_count}, 직전: {prev_view}, 증가량: {delta})")
-if os.path.exists(key_json_path):os.remove(key_json_path)
-    print("\n🎉 모든 작업이 성공적으로 완료되었습니다!")
-except Exception as sheet_error:
-print(f"❌ 구글 시트 기록 중 에러 발생: {sheet_error}")
-if name == "main":
+            print("-" * 40)
+
+        browser.close()
+
+    if not collected_results:
+        print("❌ 수집된 데이터가 없어 구글 시트 업데이트를 건너뜁니다.")
+        return
+
+    # --- [Step 2] 구글 시트 연동 및 기록 ---
+    print("\n3. 구글 시트 연동 및 데이터 기록 중...")
+    try:
+        key_json_path = "credentials.json"
+        key_content = os.environ.get("GCP_SERVICE_ACCOUNT_KEY")
+        if not key_content:
+            raise ValueError("GCP_SERVICE_ACCOUNT_KEY 환경 변수가 설정되지 않았습니다.")
+        
+        with open(key_json_path, "w", encoding="utf-8") as f:
+            f.write(key_content)
+
+        scope = [
+            "https://google.com",
+            "https://googleapis.com"
+        ]
+        creds = ServiceAccountCredentials.from_json_keyfile_name(key_json_path, scope)
+        client = gspread.authorize(creds)
+
+        spreadsheet = client.open(SPREADSHEET_NAME)
+        sheet = spreadsheet.worksheet(SHEET_TAB_NAME)
+
+        kst = pytz.timezone("Asia/Seoul")
+        now = datetime.now(kst)
+        collected_at = now.strftime("%Y-%m-%d %H:%M:%S")
+        date_str = now.strftime("%Y-%m-%d")
+        time_str = now.strftime("%H:%M")
+
+        for item in collected_results:
+            complex_num = item["id"]
+            complex_name = item["name"]
+            view_count = item["viewCount"]
+
+            prev_view = get_previous_view_count(sheet, complex_num)
+            
+            delta = ""
+            if prev_view is not None:
+                delta = view_count - prev_view
+
+            sheet.append_row([
+                collected_at,
+                date_str,
+                time_str,
+                complex_num,
+                complex_name,
+                view_count,
+                prev_view if prev_view is not None else "",
+                delta
+            ])
+            print(f"   [시트 기록 완료] {complex_name} (현재: {view_count}, 직전: {prev_view}, 증가량: {delta})")
+
+        if os.path.exists(key_json_path):
+            os.remove(key_json_path)
+
+        print("\n🎉 모든 작업이 성공적으로 완료되었습니다!")
+
+    except Exception as sheet_error:
+        print(f"❌ 구글 시트 기록 중 에러 발생: {sheet_error}")
+
+
+if __name__ == "__main__":
     main()
